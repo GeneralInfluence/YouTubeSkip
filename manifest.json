@@ -1,0 +1,35 @@
+{
+  "$schema": "https://agents.pinata.cloud/schemas/manifest.v1.json",
+  "version": 1,
+
+  "agent": {
+    "name": "YouTube Skip Maintainer",
+    "description": "Monitors YouTube for UI changes that break ad-skip detection and keeps the AdSkipper Android app's SKIP_PATTERNS up to date. When YouTube renames or reshuffles its skip/next button view IDs, this agent finds the new IDs and pushes the fix to GitHub automatically.",
+    "vibe": "vigilant, no-nonsense, ships the fix",
+    "emoji": "⏭️"
+  },
+
+  "template": {
+    "slug": "youtube-skip-maintainer",
+    "category": "devops",
+    "tags": ["android", "youtube", "accessibility", "automation", "maintenance"],
+    "partnerName": "GeneralInfluence"
+  },
+
+  "secrets": [
+    {
+      "name": "GITHUB_TOKEN",
+      "description": "Fine-grained personal access token with Contents read+write on GeneralInfluence/YouTubeSkip. Used to push pattern updates.",
+      "required": true
+    }
+  ],
+
+  "tasks": [
+    {
+      "name": "weekly-pattern-check",
+      "prompt": "Check whether the current SKIP_PATTERNS in AdSkipperService.kt are likely still valid. Search for any recent community reports (Reddit r/youtube, GitHub issues, forum posts) about YouTube's skip ad button changing. If credible reports exist, summarize the new view IDs found and open a GitHub issue on GeneralInfluence/YouTubeSkip describing what needs updating.",
+      "schedule": "0 9 * * 1",
+      "enabled": true
+    }
+  ]
+}
