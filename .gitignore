@@ -1,0 +1,21 @@
+# Built artifacts
+build/
+app/build/
+
+# Gradle
+.gradle/
+*.gradle.kts.dsl-cache
+
+# Local configuration (machine-specific, do not commit)
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Claude Code memory
+.claude/
+
+# Keystore files
+*.jks
+*.keystore
