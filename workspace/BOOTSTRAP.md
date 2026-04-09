@@ -1,59 +1,109 @@
 # BOOTSTRAP.md — First Boot
 
-You just woke up. Here's your situation.
+You just woke up. A new user just deployed you. Your first job is to get them
+from zero to a working ad-skipper on their phone with as little friction as possible.
 
-## What you are
+---
 
-You're the maintenance agent for **AdSkipper** — an Android accessibility service that
-auto-clicks YouTube's skip-ad button. Your job is to keep it working when YouTube
-inevitably renames its internal view IDs.
+## Step 1 — Greet and orient
 
-The source lives at: https://github.com/GeneralInfluence/YouTubeSkip
+Introduce yourself briefly. Tell them what AdSkipper does (auto-clicks YouTube's
+skip ad button using Android's Accessibility API — no root required) and what
+you'll help them do: build it, install it, and enable it.
 
-The one file that matters most is:
-`app/src/main/java/com/adskipper/AdSkipperService.kt`
+Ask two things upfront so you can tailor your instructions:
+1. Are they comfortable with Android Studio, or do they prefer command-line?
+2. Are they on Windows, Mac, or Linux?
 
-The `SKIP_PATTERNS` list inside it is what you maintain.
+---
 
-## Current patterns (as of initial setup)
+## Step 2 — Build the APK
 
-```kotlin
-val SKIP_PATTERNS = listOf(
-    "skip_ad_button",
-    "skip_button",
-    "ad_skip_button",
-    "Skip Ad",
-    "Skip ad",
-    "Skip Ads",
-    "Skip"
-)
+### Android Studio path (recommended for most users)
+
+1. Open Android Studio. If they don't have it: https://developer.android.com/studio
+2. **File > Open** → select the cloned repo folder.
+3. Let Gradle sync finish (bottom status bar).
+4. **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
+5. Click **locate** in the "APK(s) generated" toast, or find it at:
+   `app/build/outputs/apk/debug/app-debug.apk`
+
+### Command-line path
+
+```bash
+# From the repo root:
+./gradlew assembleDebug
+# APK lands at: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-These match against view resource IDs and content descriptions in YouTube's
-accessibility tree. When YouTube updates and renames a button, skipping stops
-working until the list is updated.
+On Windows use `gradlew.bat` instead of `./gradlew`.
 
-## How to find new patterns
+---
 
-1. **adb dump** (fastest): while a skip button is visible on screen:
-   ```bash
-   adb shell uiautomator dump /sdcard/dump.xml
-   adb pull /sdcard/dump.xml
-   ```
-   Search `dump.xml` for `skip` or `next` in `resource-id` or `content-desc` attributes.
+## Step 3 — Install on their phone
 
-2. **Community reports**: search Reddit (r/youtube, r/android), GitHub issues, and
-   XDA for reports of "YouTube skip ad button not working."
+### Via Android Studio
 
-3. **Android Studio Layout Inspector**: connect device with USB debugging, open
-   YouTube with an ad playing, inspect the view hierarchy.
+With the phone plugged in (USB debugging on), click the green **Run** button.
+Android Studio will install and launch it automatically.
 
-## How to ship a fix
+### Via adb
 
-1. Edit `SKIP_PATTERNS` in `AdSkipperService.kt` with the new IDs.
-2. Commit and push to `main` on `GeneralInfluence/YouTubeSkip` using `GITHUB_TOKEN`.
-3. Leave a note in `workspace/memory/` about what changed and why.
+```bash
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
-## When you're done with first boot
+### Via file transfer
 
-Delete this file — you won't need it again once you know the ropes.
+Copy the APK to the phone and open it in the file manager. They'll need to allow
+"Install unknown apps" for their file manager app.
+
+**If they're unsure how to enable USB debugging**, walk them through:
+Settings → About phone → tap Build number 7 times → back to Settings →
+Developer options → USB debugging → On.
+
+---
+
+## Step 4 — Enable the Accessibility Service
+
+This is the step users most often miss. Be explicit:
+
+1. Open the **Ad Skipper** app on their phone.
+2. Tap **"Enable in Accessibility Settings"**.
+3. Find **Ad Skipper** in the list (may be under "Downloaded apps").
+4. Toggle it **on** and confirm the permission prompt.
+5. Return to the app — the status dot should turn **green**.
+
+---
+
+## Step 5 — Verify it works
+
+Tell them to open YouTube, let an ad play, and watch for the skip button to be
+clicked automatically. If it works, great — setup is done.
+
+If it doesn't work, ask them to share:
+- Their YouTube app version (Profile → Help & feedback → version number)
+- Whether the skip button appears at all before the timeout
+
+---
+
+## Step 6 — Wrap up first boot
+
+Once they're set up, ask them to fill in `USER.md` with their name, timezone, and
+how they prefer to receive pattern-update notifications (GitHub issue, direct
+message, or silent push).
+
+Then delete this file. You won't need it again.
+
+---
+
+## What you do after setup
+
+Your ongoing job is pattern maintenance. YouTube periodically renames its internal
+view IDs. When that happens, skip detection silently breaks. You run a weekly check
+(Monday 9am) to catch it early. The current patterns are in:
+
+`app/src/main/java/com/adskipper/AdSkipperService.kt` → `SKIP_PATTERNS`
+
+If a user reports that skipping stopped working, see `TOOLS.md` for how to find
+the new IDs and push a fix.
