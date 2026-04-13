@@ -11,34 +11,43 @@ class AdSkipperService : AccessibilityService() {
         private const val TAG = "AdSkipperService"
 
         /**
-         * Patterns matched against viewIdResourceName, contentDescription, and text.
-         *
-         * HOW TO UPDATE THESE:
-         * 1. Install "UI Automator Viewer" (comes with Android SDK) or run:
-         *      adb shell uiautomator dump /sdcard/dump.xml && adb pull /sdcard/dump.xml
-         * 2. Open YouTube, let an ad play until the skip/next button appears.
-         * 3. Run the dump, open the XML, and search for the button node.
-         * 4. Copy the `resource-id` and `content-desc` values into this list.
-         *
-         * Known values as of YouTube ~19.x (add new ones without removing old):
+         * Patterns that unambiguously identify an ad skip button.
+         * Clicked immediately without requiring further confirmation.
          */
-        val SKIP_PATTERNS = listOf(
-            // View IDs (resource names)
+        val AD_SKIP_PATTERNS = listOf(
             "skip_ad_button",
-            "skip_button",
             "ad_skip_button",
-
-            // Content descriptions and text labels
             "Skip Ad",
             "Skip ad",
-            "Skip Ads",
-            "Skip",
+            "Skip Ads"
+        )
 
+        /**
+         * Patterns that could also appear in normal video playback controls
+         * (e.g. the "skip forward" or "next video" buttons). Only acted on
+         * when an ad indicator is also visible in the view hierarchy.
+         */
+        val AMBIGUOUS_SKIP_PATTERNS = listOf(
+            "skip_button",
+            "Skip"
+        )
+
+        /**
+         * Any of these present in the view hierarchy confirms an ad is playing.
+         * Add new entries here if YouTube introduces new ad overlay indicators.
+         */
+        val AD_INDICATOR_PATTERNS = listOf(
+            "ad_badge",
+            "ad_progress",
+            "ad_text",
+            "ad_counter",
+            "ad_duration",
+            "Ad",
+            "Sponsored"
         )
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        // Only act on content changes and window transitions
         val type = event.eventType
         if (type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -46,40 +55,74 @@ class AdSkipperService : AccessibilityService() {
 
         val root = rootInActiveWindow ?: return
         try {
-            findAndClick(root)
+            val adPlaying = hasAdIndicator(root)
+            findAndClick(root, adPlaying)
         } finally {
             root.recycle()
         }
     }
 
     /**
-     * Recursively walks the view hierarchy looking for a skip/next button.
-     * Clicks the first match it finds.
+     * Returns true if any node in the hierarchy signals that an ad is playing.
      */
-    private fun findAndClick(node: AccessibilityNodeInfo): Boolean {
-        val viewId   = node.viewIdResourceName?.lowercase() ?: ""
-        val desc     = node.contentDescription?.toString() ?: ""
-        val text     = node.text?.toString() ?: ""
+    private fun hasAdIndicator(node: AccessibilityNodeInfo): Boolean {
+        val viewId = node.viewIdResourceName?.lowercase() ?: ""
+        val desc   = node.contentDescription?.toString() ?: ""
+        val text   = node.text?.toString() ?: ""
 
-        val matched = SKIP_PATTERNS.any { pattern ->
+        val matched = AD_INDICATOR_PATTERNS.any { pattern ->
             val p = pattern.lowercase()
-            viewId.contains(p) || desc.equals(pattern, ignoreCase = true) || text.equals(pattern, ignoreCase = true)
+            viewId.contains(p) ||
+            desc.equals(pattern, ignoreCase = true) ||
+            text.equals(pattern, ignoreCase = true)
+        }
+        if (matched) return true
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = hasAdIndicator(child)
+            child.recycle()
+            if (found) return true
+        }
+        return false
+    }
+
+    /**
+     * Recursively walks the view hierarchy looking for a skip button to click.
+     * AD_SKIP_PATTERNS are always eligible; AMBIGUOUS_SKIP_PATTERNS require
+     * adPlaying=true to guard against false positives on playback controls.
+     */
+    private fun findAndClick(node: AccessibilityNodeInfo, adPlaying: Boolean): Boolean {
+        val viewId = node.viewIdResourceName?.lowercase() ?: ""
+        val desc   = node.contentDescription?.toString() ?: ""
+        val text   = node.text?.toString() ?: ""
+
+        val isAdSkip = AD_SKIP_PATTERNS.any { pattern ->
+            val p = pattern.lowercase()
+            viewId.contains(p) ||
+            desc.equals(pattern, ignoreCase = true) ||
+            text.equals(pattern, ignoreCase = true)
         }
 
-        if (matched) {
-            // Prefer a directly-clickable node; climb up one level if needed
+        val isAmbiguousSkip = !isAdSkip && adPlaying && AMBIGUOUS_SKIP_PATTERNS.any { pattern ->
+            val p = pattern.lowercase()
+            viewId.contains(p) ||
+            desc.equals(pattern, ignoreCase = true) ||
+            text.equals(pattern, ignoreCase = true)
+        }
+
+        if (isAdSkip || isAmbiguousSkip) {
             val target = if (node.isClickable) node else node.parent
             if (target != null && target.isClickable) {
                 val clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.d(TAG, "Clicked skip/next (id='$viewId' desc='$desc' text='$text'): success=$clicked")
+                Log.d(TAG, "Clicked skip button (id='$viewId' desc='$desc' text='$text' adConfirmed=$adPlaying): success=$clicked")
                 return true
             }
         }
 
-        // Recurse into children
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            val found = findAndClick(child)
+            val found = findAndClick(child, adPlaying)
             child.recycle()
             if (found) return true
         }
