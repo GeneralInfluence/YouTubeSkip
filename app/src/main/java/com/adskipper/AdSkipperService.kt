@@ -33,15 +33,23 @@ class AdSkipperService : AccessibilityService() {
         )
 
         /**
-         * Any of these present in the view hierarchy confirms an ad is playing.
-         * Add new entries here if YouTube introduces new ad overlay indicators.
+         * View ID fragments that only appear in YouTube's ad overlay.
+         * Matched via viewId.contains() — keep these specific enough to avoid
+         * false matches (e.g. don't use bare "ad", which hits "loaded", "upload", etc.)
          */
-        val AD_INDICATOR_PATTERNS = listOf(
+        val AD_INDICATOR_VIEW_IDS = listOf(
             "ad_badge",
             "ad_progress",
             "ad_text",
             "ad_counter",
-            "ad_duration",
+            "ad_duration"
+        )
+
+        /**
+         * Exact text/content-description labels shown only during ads.
+         * Matched via equals() only — never used in a contains() check.
+         */
+        val AD_INDICATOR_LABELS = listOf(
             "Ad",
             "Sponsored"
         )
@@ -70,13 +78,11 @@ class AdSkipperService : AccessibilityService() {
         val desc   = node.contentDescription?.toString() ?: ""
         val text   = node.text?.toString() ?: ""
 
-        val matched = AD_INDICATOR_PATTERNS.any { pattern ->
-            val p = pattern.lowercase()
-            viewId.contains(p) ||
-            desc.equals(pattern, ignoreCase = true) ||
-            text.equals(pattern, ignoreCase = true)
+        val matchedViewId = AD_INDICATOR_VIEW_IDS.any { pattern -> viewId.contains(pattern.lowercase()) }
+        val matchedLabel  = AD_INDICATOR_LABELS.any { pattern ->
+            desc.equals(pattern, ignoreCase = true) || text.equals(pattern, ignoreCase = true)
         }
-        if (matched) return true
+        if (matchedViewId || matchedLabel) return true
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
