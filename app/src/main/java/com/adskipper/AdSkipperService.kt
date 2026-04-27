@@ -1,6 +1,7 @@
 package com.adskipper
 
 import android.accessibilityservice.AccessibilityService
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -61,12 +62,27 @@ class AdSkipperService : AccessibilityService() {
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         ) return
 
-        val root = rootInActiveWindow ?: return
-        try {
-            val adPlaying = hasAdIndicator(root)
-            findAndClick(root, adPlaying)
-        } finally {
-            root.recycle()
+        // Check the active window
+        rootInActiveWindow?.let { root ->
+            try {
+                findAndClick(root, hasAdIndicator(root))
+            } finally {
+                root.recycle()
+            }
+        }
+
+        // Also scan PiP windows — requires API 26 and flagRetrieveInteractiveWindows
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            windows
+                .filter { it.isInPictureInPictureMode }
+                .forEach { window ->
+                    val pipRoot = window.root ?: return@forEach
+                    try {
+                        findAndClick(pipRoot, hasAdIndicator(pipRoot))
+                    } finally {
+                        pipRoot.recycle()
+                    }
+                }
         }
     }
 
