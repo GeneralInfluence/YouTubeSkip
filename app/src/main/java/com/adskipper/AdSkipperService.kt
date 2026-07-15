@@ -11,6 +11,8 @@ class AdSkipperService : AccessibilityService() {
     companion object {
         private const val TAG = "AdSkipperService"
 
+        private const val YOUTUBE_PKG = "com.google.android.youtube"
+
         /**
          * Patterns that unambiguously identify an ad skip button.
          * Clicked immediately without requiring further confirmation.
@@ -62,23 +64,34 @@ class AdSkipperService : AccessibilityService() {
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         ) return
 
-        // Check the active window
+        // The service no longer filters events by package (so it still wakes
+        // while another app — e.g. a game — is in the foreground and YouTube
+        // plays in a PiP window). Because of that, we must only ever act on
+        // YouTube's own windows; never scan or click inside another app's UI.
+
+        // Check the active window, but only when YouTube itself is in front.
         rootInActiveWindow?.let { root ->
             try {
-                findAndClick(root, hasAdIndicator(root))
+                if (root.packageName == YOUTUBE_PKG) {
+                    findAndClick(root, hasAdIndicator(root))
+                }
             } finally {
                 root.recycle()
             }
         }
 
-        // Also scan PiP windows — requires API 26 and flagRetrieveInteractiveWindows
+        // Also scan YouTube's PiP window — requires API 26 and
+        // flagRetrieveInteractiveWindows. This is the path that fires while a
+        // different app is foreground and YouTube is minimized to PiP.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             windows
                 .filter { it.isInPictureInPictureMode }
                 .forEach { window ->
                     val pipRoot = window.root ?: return@forEach
                     try {
-                        findAndClick(pipRoot, hasAdIndicator(pipRoot))
+                        if (pipRoot.packageName == YOUTUBE_PKG) {
+                            findAndClick(pipRoot, hasAdIndicator(pipRoot))
+                        }
                     } finally {
                         pipRoot.recycle()
                     }
