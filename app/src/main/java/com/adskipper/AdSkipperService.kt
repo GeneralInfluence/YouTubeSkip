@@ -79,6 +79,17 @@ class AdSkipperService : AccessibilityService() {
             "Ad",
             "Sponsored"
         )
+
+        /**
+         * A node is NEVER clicked if it looks like a next/previous navigation
+         * control — those advance or rewind the video (the "it jumped to the
+         * next video" bug). Matched via contains() on id/desc/text.
+         */
+        val NAV_EXCLUDE_PATTERNS = listOf(
+            "next",
+            "previous",
+            "prev_button"
+        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -201,14 +212,22 @@ class AdSkipperService : AccessibilityService() {
         val desc   = node.contentDescription?.toString() ?: ""
         val text   = node.text?.toString() ?: ""
 
-        val isAdSkip = AD_SKIP_PATTERNS.any { pattern ->
+        // Never click a next/previous navigation control, even if it happens to
+        // also match a skip pattern — advancing the video is never what we want.
+        val isNavControl = NAV_EXCLUDE_PATTERNS.any { p ->
+            viewId.contains(p) ||
+            desc.contains(p, ignoreCase = true) ||
+            text.contains(p, ignoreCase = true)
+        }
+
+        val isAdSkip = !isNavControl && AD_SKIP_PATTERNS.any { pattern ->
             val p = pattern.lowercase()
             viewId.contains(p) ||
             desc.equals(pattern, ignoreCase = true) ||
             text.equals(pattern, ignoreCase = true)
         }
 
-        val isAmbiguousSkip = !isAdSkip && adPlaying && AMBIGUOUS_SKIP_PATTERNS.any { pattern ->
+        val isAmbiguousSkip = !isNavControl && !isAdSkip && adPlaying && AMBIGUOUS_SKIP_PATTERNS.any { pattern ->
             val p = pattern.lowercase()
             viewId.contains(p) ||
             desc.equals(pattern, ignoreCase = true) ||
@@ -220,6 +239,9 @@ class AdSkipperService : AccessibilityService() {
             if (target != null && target.isClickable) {
                 val clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 Log.d(TAG, "Clicked skip button (id='$viewId' desc='$desc' text='$text' adConfirmed=$adPlaying): success=$clicked")
+                // Diagnostic: show exactly what was clicked so a false positive
+                // can be identified by its real id/desc/text without adb.
+                diagToast("AdSkipper clicked → id='${viewId.substringAfterLast('/')}' desc='$desc' text='$text' ad=$adPlaying")
                 return true
             }
         }
