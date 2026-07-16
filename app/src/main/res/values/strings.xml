@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Ad Skipper</string>
     <string name="subtitle">Auto-skips YouTube ads</string>
+    <string name="version_label">Version %1$s</string>
     <string name="service_label">Ad Skipper</string>
     <string name="service_description">Automatically taps Skip Ad and Next buttons in YouTube.</string>
 

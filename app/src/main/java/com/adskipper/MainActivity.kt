@@ -20,6 +20,14 @@ class MainActivity : AppCompatActivity() {
         binding.btnOpenSettings.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+
+        binding.tvVersion.text = getString(R.string.version_label, appVersionName())
+    }
+
+    private fun appVersionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    } catch (e: Exception) {
+        "?"
     }
 
     override fun onResume() {
