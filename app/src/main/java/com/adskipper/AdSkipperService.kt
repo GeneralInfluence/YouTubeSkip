@@ -2,9 +2,13 @@ package com.adskipper
 
 import android.accessibilityservice.AccessibilityService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 
 class AdSkipperService : AccessibilityService() {
 
@@ -12,6 +16,25 @@ class AdSkipperService : AccessibilityService() {
         private const val TAG = "AdSkipperService"
 
         private const val YOUTUBE_PKG = "com.google.android.youtube"
+
+        /**
+         * How often to poll YouTube's PiP window for a skip button. Polling is
+         * required because the service is otherwise event-driven, and the app in
+         * the foreground while YouTube is minimized (e.g. a full-screen game) may
+         * emit few or no accessibility events — so onAccessibilityEvent would
+         * never fire to trigger a scan.
+         */
+        private const val PIP_POLL_INTERVAL_MS = 1000L
+
+        /** Minimum gap between two identical on-screen diagnostic toasts. */
+        private const val TOAST_THROTTLE_MS = 4000L
+
+        /**
+         * Set false to silence the on-screen diagnostic toasts once PiP skipping
+         * is confirmed working. They exist to show the user (without adb) exactly
+         * what the service can see in the PiP window.
+         */
+        private const val DIAGNOSTICS = true
 
         /**
          * Patterns that unambiguously identify an ad skip button.
@@ -58,18 +81,34 @@ class AdSkipperService : AccessibilityService() {
         )
     }
 
+    private val handler = Handler(Looper.getMainLooper())
+
+    /** Repeatedly scans YouTube's PiP window; reschedules itself. */
+    private val pipPoller = object : Runnable {
+        override fun run() {
+            try {
+                scanYouTubePip()
+            } catch (e: Exception) {
+                Log.e(TAG, "PiP poll failed", e)
+            } finally {
+                handler.postDelayed(this, PIP_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    // Toast de-duplication + PiP-presence edge detection.
+    private var lastToastMsg = ""
+    private var lastToastAt = 0L
+    private var pipWasPresent = false
+
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val type = event.eventType
         if (type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         ) return
 
-        // The service no longer filters events by package (so it still wakes
-        // while another app — e.g. a game — is in the foreground and YouTube
-        // plays in a PiP window). Because of that, we must only ever act on
-        // YouTube's own windows; never scan or click inside another app's UI.
-
-        // Check the active window, but only when YouTube itself is in front.
+        // Foreground YouTube (full-screen): scan the active window on each event
+        // for responsive skipping. Only ever act on YouTube's own window.
         rootInActiveWindow?.let { root ->
             try {
                 if (root.packageName == YOUTUBE_PKG) {
@@ -79,24 +118,54 @@ class AdSkipperService : AccessibilityService() {
                 root.recycle()
             }
         }
+        // The PiP case is handled by the timer (pipPoller), not here — the
+        // foreground app may emit no events to drive an event-based scan.
+    }
 
-        // Also scan YouTube's PiP window — requires API 26 and
-        // flagRetrieveInteractiveWindows. This is the path that fires while a
-        // different app is foreground and YouTube is minimized to PiP.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            windows
-                .filter { it.isInPictureInPictureMode }
-                .forEach { window ->
-                    val pipRoot = window.root ?: return@forEach
-                    try {
-                        if (pipRoot.packageName == YOUTUBE_PKG) {
-                            findAndClick(pipRoot, hasAdIndicator(pipRoot))
+    /**
+     * Scans YouTube's picture-in-picture window (if any) for a skip button.
+     * Runs on a timer so it works even when the foreground app is silent.
+     * Requires API 26+ and flagRetrieveInteractiveWindows.
+     */
+    private fun scanYouTubePip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        var pipPresent = false
+        windows
+            .filter { it.isInPictureInPictureMode }
+            .forEach { window ->
+                val pipRoot = window.root ?: return@forEach
+                try {
+                    if (pipRoot.packageName == YOUTUBE_PKG) {
+                        pipPresent = true
+                        val adPlaying = hasAdIndicator(pipRoot)
+                        val clicked = findAndClick(pipRoot, adPlaying)
+                        when {
+                            clicked  -> diagToast("AdSkipper: skipped ad in mini-player ✓")
+                            adPlaying -> diagToast("AdSkipper: ad in mini-player, but no skip button is accessible")
                         }
-                    } finally {
-                        pipRoot.recycle()
                     }
+                } finally {
+                    pipRoot.recycle()
                 }
+            }
+
+        // Announce once when the mini-player appears, so the user can confirm
+        // the service is actually watching it (vs. not detecting it at all).
+        if (pipPresent && !pipWasPresent) {
+            diagToast("AdSkipper: watching YouTube mini-player")
         }
+        pipWasPresent = pipPresent
+    }
+
+    /** Shows a short on-screen message, throttled so identical toasts don't spam. */
+    private fun diagToast(msg: String) {
+        if (!DIAGNOSTICS) return
+        val now = SystemClock.uptimeMillis()
+        if (msg == lastToastMsg && now - lastToastAt < TOAST_THROTTLE_MS) return
+        lastToastMsg = msg
+        lastToastAt = now
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -172,5 +241,17 @@ class AdSkipperService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d(TAG, "AdSkipper service connected")
+        handler.removeCallbacks(pipPoller)
+        handler.postDelayed(pipPoller, PIP_POLL_INTERVAL_MS)
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        handler.removeCallbacks(pipPoller)
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(pipPoller)
+        super.onDestroy()
     }
 }
